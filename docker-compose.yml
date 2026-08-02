@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # Node.js + WebSocket Proxy Engine
+  livechat-nodejs:
+    build:
+      context: ./nodejs-version
+      dockerfile: Dockerfile
+    container_name: livechat-nodejs
+    ports:
+      - "${NODE_PORT:-3000}:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PORT=3000
+    restart: unless-stopped
+
+  # Python FastAPI + WebSocket Engine
+  livechat-python:
+    build:
+      context: ./python-version
+      dockerfile: Dockerfile
+    container_name: livechat-python
+    ports:
+      - "${PYTHON_PORT:-8000}:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PORT=8000
+    restart: unless-stopped

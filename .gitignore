@@ -1,0 +1,35 @@
+# Secrets and Environment Variables
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Project Specific Agent Rules & Documentation (Local execution only)
+.agents/
+PROJECT_GUIDE.md
+
+# Dependencies & Build Files
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Python Environments & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
