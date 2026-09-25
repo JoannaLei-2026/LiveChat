@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 import httpx
@@ -16,6 +16,7 @@ load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 PORT = int(os.getenv("PORT", os.getenv("PYTHON_PORT", "8000")))
 
 app = FastAPI(title="Live Chat")
@@ -38,8 +39,57 @@ async def health_check():
     return {
         "status": "ok",
         "hasApiKey": bool(GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here"),
+        "hasOpenAiApiKey": bool(OPENAI_API_KEY and OPENAI_API_KEY != "your_api_key_here"),
         "version": "1.0.0-python"
     }
+
+
+@app.post("/api/openai/live-session")
+async def create_openai_live_session(request: Request):
+    origin = request.headers.get("origin")
+    if not origin or origin.split("://", 1)[-1] != request.headers.get("host"):
+        return JSONResponse({"error": "來源不符。"}, status_code=403)
+    try:
+        if int(request.headers.get("content-length", "0")) > 70000:
+            return JSONResponse({"error": "請求過大。"}, status_code=413)
+        payload = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return JSONResponse({"error": "無效的請求。"}, status_code=400)
+    sdp = payload.get("sdp") if isinstance(payload, dict) else None
+    instructions = payload.get("instructions") if isinstance(payload, dict) else None
+    if (not isinstance(sdp, str) or not sdp.strip() or len(sdp) > 65536 or
+            not isinstance(instructions, str) or not instructions.strip() or len(instructions) > 4000):
+        return JSONResponse({"error": "無效的 SDP 或角色設定。"}, status_code=400)
+    if not OPENAI_API_KEY or OPENAI_API_KEY == "your_api_key_here":
+        return JSONResponse({"error": "請在 .env 設定 OPENAI_API_KEY。"}, status_code=503)
+    session_payload = {
+        "session": {
+            "model": "gpt-live-1",
+            "instructions": instructions,
+            "delegation": {
+                "type": "responses",
+                "responses": {
+                    "model": "gpt-5.6-terra",
+                    "instructions": "協助回答需要深入推理的問題，簡潔回覆以便口語轉述。",
+                },
+            },
+        },
+        "transport": {"type": "webrtc", "sdp": sdp},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/live/sessions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json=session_payload,
+            )
+        if response.is_error:
+            print(f"[OpenAI Live] Session creation failed: {response.status_code}")
+            return JSONResponse({"error": f"建立 GPT-Live 會話失敗 ({response.status_code})。"}, status_code=response.status_code)
+        return JSONResponse(response.json(), status_code=201)
+    except httpx.HTTPError as error:
+        print(f"[OpenAI Live] Session creation error: {error}")
+        return JSONResponse({"error": "無法連線至 OpenAI Live API。"}, status_code=502)
 
 
 @app.websocket("/ws")

@@ -30,7 +30,7 @@
           <i class="fa-solid fa-bolt-lightning logo-icon"></i>
           <span class="logo-text">Live <span>Chat</span></span>
         </div>
-        <div class="model-badge">
+        <div class="model-badge" id="modelBadge">
           <i class="fa-solid fa-brain"></i> Gemini 3.1 Flash Live
         </div>
         <div class="status-badge" id="statusBadge">
@@ -121,7 +121,7 @@
           <i class="fa-solid fa-wand-magic-sparkles"></i>
           <h2>設定聊天對象 (System Persona Prompt)</h2>
         </div>
-        <p class="modal-subtitle">請輸入您想設定的聊天對象性格、背景或指令，讓 Gemini 即時扮演該角色對話：</p>
+        <p class="modal-subtitle">選擇語音服務並設定聊天對象。GPT-Live 會在點擊麥克風時開始計費會話。</p>
       </div>
 
       <!-- Preset Quick Selection Cards -->
@@ -147,6 +147,14 @@
         </div>
       </div>
 
+      <div class="custom-prompt-wrapper">
+        <label for="providerSelect">語音服務</label>
+        <select id="providerSelect">
+          <option value="gemini">Gemini Live</option>
+          <option value="openai">OpenAI GPT-Live</option>
+        </select>
+      </div>
+
       <!-- Custom Prompt Textarea -->
       <div class="custom-prompt-wrapper">
         <label for="customPersonaInput"><i class="fa-solid fa-pen-to-square"></i> 自訂對話角色提示詞 (System Instruction):</label>
@@ -167,6 +175,7 @@
   </div>
 
   <!-- Application JS -->
+  <script src="openai-live.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

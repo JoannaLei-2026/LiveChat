@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCancelModal = document.getElementById('btnCancelModal');
   const btnChangePersona = document.getElementById('btnChangePersona');
   const currentPersonaText = document.getElementById('currentPersonaText');
+  const providerSelect = document.getElementById('providerSelect');
+  const modelBadge = document.getElementById('modelBadge');
 
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
@@ -21,10 +23,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnMicToggle = document.getElementById('btnMicToggle');
   const micIcon = document.getElementById('micIcon');
   const micText = document.getElementById('micText');
+  const btnMicMain = document.getElementById('btnMicMain');
+  const mainMicIcon = document.getElementById('mainMicIcon');
+  const mainMicText = document.getElementById('mainMicText');
   const waveBars = document.querySelectorAll('.wave-bar');
   const waveStatusText = document.getElementById('waveStatusText');
 
   let ws = null;
+  let currentProvider = 'gemini';
+  const openAiCaptions = { user: null, ai: null };
+  const openAiCaptionTimes = { user: -Infinity, ai: -Infinity };
+  const openAiLive = new window.OpenAILiveConnection({
+    onStatus: (connected, label) => {
+      if (currentProvider !== 'openai') return;
+      updateStatus(connected, label);
+      if (/失敗|中斷|結束|逾時/.test(label)) setOpenAiMicUi(false);
+    },
+    onError: message => appendSystemNotice(`⚠️ ${message}`),
+    onTranscript: (role, delta, startMs) => {
+      if (currentProvider !== 'openai' || !delta) return;
+      if (!openAiCaptions[role] || startMs - openAiCaptionTimes[role] > 2000) {
+        const row = document.createElement('div');
+        row.className = `message ${role}`;
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        avatar.innerHTML = role === 'user' ? '<i class="fa-solid fa-user"></i>' : '<i class="fa-solid fa-sparkles"></i>';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        row.append(avatar, bubble);
+        chatWindow.appendChild(row);
+        openAiCaptions[role] = bubble;
+      }
+      openAiCaptions[role].textContent += delta;
+      openAiCaptionTimes[role] = startMs;
+      scrollToBottom();
+    }
+  });
   let currentPersona = '';
   let activeAiBubble = null;
   let activeAiTextSpan = null;
@@ -62,6 +96,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     currentPersona = persona;
+    const previousProvider = currentProvider;
+    currentProvider = providerSelect.value;
+    if (previousProvider === 'openai') openAiLive.stop();
+    if (ws) { ws.close(); ws = null; }
+    if (isMicRecording && previousProvider === 'gemini') stopMicRecording();
+    openAiCaptions.user = openAiCaptions.ai = null;
+    openAiCaptionTimes.user = openAiCaptionTimes.ai = -Infinity;
+    modelBadge.innerHTML = currentProvider === 'openai'
+      ? '<i class="fa-solid fa-brain"></i> OpenAI GPT-Live'
+      : '<i class="fa-solid fa-brain"></i> Gemini 3.1 Flash Live';
+    btnVoiceGender.style.display = currentProvider === 'openai' ? 'none' : '';
     currentPersonaText.textContent = persona;
     closeModal();
     
@@ -70,7 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
     appendSystemNotice(`已設定對話對象 Persona：「${persona}」`);
 
     // Connect / Re-init WebSocket
-    initWebSocket(currentPersona);
+    if (currentProvider === 'openai') {
+      openAiLive.setMuted(!isVoiceEnabled);
+      updateStatus(false, 'GPT-Live 已就緒，點擊麥克風開始');
+      setOpenAiMicUi(false);
+    } else {
+      initWebSocket(currentPersona);
+    }
   });
 
   // Change Persona Button
@@ -109,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Voice Toggle Button Click
   btnVoiceToggle.addEventListener('click', () => {
     isVoiceEnabled = !isVoiceEnabled;
+    if (currentProvider === 'openai') openAiLive.setMuted(!isVoiceEnabled);
     if (isVoiceEnabled) {
       btnVoiceToggle.className = 'btn btn-voice-toggle active';
       voiceToggleIcon.className = 'fa-solid fa-volume-high';
@@ -185,12 +237,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Mic Toggle Handlers
   const toggleMicAction = async () => {
+    if (currentProvider === 'openai') {
+      if (!currentPersona) return openModal(true);
+      if (openAiLive.closing) return;
+      if (openAiLive.ready || openAiLive.starting) {
+        openAiLive.stop();
+        setOpenAiMicUi(false);
+      } else {
+        setOpenAiMicUi(true);
+        await openAiLive.start(currentPersona);
+      }
+      return;
+    }
     if (!isMicRecording) {
       await startMicRecording();
     } else {
       stopMicRecording();
     }
   };
+
+  function setOpenAiMicUi(active) {
+    isMicRecording = active;
+    btnMicToggle.className = active ? 'btn btn-mic active' : 'btn btn-mic';
+    micIcon.className = active ? 'fa-solid fa-microphone' : 'fa-solid fa-microphone-slash';
+    micText.textContent = active ? '結束 GPT-Live 通話' : '開啟麥克風';
+    if (btnMicMain) {
+      btnMicMain.className = active ? 'btn btn-mic-main active' : 'btn btn-mic-main';
+      mainMicIcon.className = micIcon.className;
+      mainMicText.textContent = active ? 'GPT-Live 通話中 (點擊結束)' : '點擊開啟麥克風，開始全程語音對話';
+    }
+  }
 
   btnMicToggle.addEventListener('click', toggleMicAction);
   if (btnMicMain) {

@@ -11,6 +11,7 @@ services:
       - "${NODE_PORT:-3000}:3000"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PORT=3000
     restart: unless-stopped
 
@@ -24,5 +25,6 @@ services:
       - "${PYTHON_PORT:-8000}:8000"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PORT=8000
     restart: unless-stopped

@@ -8,7 +8,10 @@
 
 # Project Specific Agent Rules & Documentation (Local execution only)
 .agents/
+Agent.md
 PROJECT_GUIDE.md
+README_AI.md
+docs/
 
 # Dependencies & Build Files
 node_modules/

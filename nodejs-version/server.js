@@ -14,6 +14,7 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.NODE_PORT || process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Serve static frontend files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -24,8 +25,58 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     hasApiKey: !!GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_api_key_here',
+    hasOpenAiApiKey: !!OPENAI_API_KEY && OPENAI_API_KEY !== 'your_api_key_here',
     version: '1.0.0-node'
   });
+});
+
+// The browser sends its WebRTC offer here; the project key never reaches the browser.
+app.post('/api/openai/live-session', async (req, res) => {
+  const origin = req.get('origin');
+  if (!origin) return res.status(403).json({ error: '來源不符。' });
+  try {
+    if (new URL(origin).host !== req.get('host')) {
+      return res.status(403).json({ error: '來源不符。' });
+    }
+  } catch {
+    return res.status(403).json({ error: '來源不符。' });
+  }
+  const { sdp, instructions } = req.body || {};
+  if (typeof sdp !== 'string' || !sdp.trim() || sdp.length > 65536 ||
+      typeof instructions !== 'string' || !instructions.trim() || instructions.length > 4000) {
+    return res.status(400).json({ error: '無效的 SDP 或角色設定。' });
+  }
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_api_key_here') {
+    return res.status(503).json({ error: '請在 .env 設定 OPENAI_API_KEY。' });
+  }
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/live/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        session: {
+          model: 'gpt-live-1',
+          instructions,
+          delegation: {
+            type: 'responses',
+            responses: { model: 'gpt-5.6-terra', instructions: '協助回答需要深入推理的問題，簡潔回覆以便口語轉述。' }
+          }
+        },
+        transport: { type: 'webrtc', sdp }
+      })
+    });
+    if (!upstream.ok) {
+      console.error('[OpenAI Live] Session creation failed:', upstream.status);
+      return res.status(upstream.status).json({ error: `建立 GPT-Live 會話失敗 (${upstream.status})。` });
+    }
+    return res.status(201).json(await upstream.json());
+  } catch (error) {
+    console.error('[OpenAI Live] Session creation error:', error);
+    return res.status(502).json({ error: '無法連線至 OpenAI Live API。' });
+  }
 });
 
 // WebSocket Connection Handling
@@ -299,3 +350,5 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🔗 Web UI: http://localhost:${PORT}`);
   console.log(`==================================================`);
 });
+
+module.exports = server;
