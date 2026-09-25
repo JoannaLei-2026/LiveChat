@@ -55,3 +55,12 @@ python main.py
 Gemini 模式透過本機 WebSocket 將麥克風音訊傳給後端，再由後端連接 Gemini Live，將模型音訊與字幕傳回瀏覽器。OpenAI 模式由瀏覽器透過 WebRTC 傳送麥克風音訊並接收語音；後端只負責用 `OPENAI_API_KEY` 建立會話，金鑰不傳到瀏覽器。OpenAI 的資料通道提供雙方字幕；再次點擊麥克風會送出結束會話指令。Gemini 的文字 REST 備援只處理文字，不能接手語音。
 
 OpenAI 模式需要有 GPT-Live 使用權限的 OpenAI API 專案金鑰；程式固定使用 `gpt-live-1` 語音模型與 `gpt-5.6-terra` Responses 委派模型。麥克風須在 HTTPS 或 localhost 使用。GPT-Live 依會話時長計費，Responses 委派另計費。此展示專案的會話建立端點沒有使用者登入或用量限制；若對外公開，請先加上驗證、限流與 HTTPS。參考 [GPT-Live 入門](https://developers.openai.com/api/docs/guides/live) 與 [WebRTC 連線](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live)。
+
+
+## 授權
+
+本專案採用 GNU General Public License v3.0（GPL-3.0-only），僅適用第 3 版。完整條款請見 [LICENSE](LICENSE)。
+
+允許使用、修改與商用；散布本專案或受 GPL 涵蓋的修改版本時，須遵守 GPL-3.0，包括依條款提供對應原始碼，並以相同授權散布受涵蓋的作品。
+
+第三方相依套件仍依各自的授權條款提供。

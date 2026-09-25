@@ -1,6 +1,7 @@
 {
   "name": "gemini-live-chat-nodejs",
   "version": "1.0.0",
+  "license": "GPL-3.0-only",
   "description": "Live Chat Real-time Chat Web App (Node.js version)",
   "main": "server.js",
   "scripts": {
