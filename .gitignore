@@ -13,6 +13,12 @@ PROJECT_GUIDE.md
 README_AI.md
 docs/
 
+# Local Google Cloud Run deployment files
+/CLOUD_RUN.md
+/deploy-cloudrun.bat
+/deploy-cloudrun.ps1
+/nodejs-version/.gcloudignore
+
 # Dependencies & Build Files
 node_modules/
 npm-debug.log

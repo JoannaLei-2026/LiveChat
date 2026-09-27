@@ -121,7 +121,7 @@
           <i class="fa-solid fa-wand-magic-sparkles"></i>
           <h2>設定聊天對象 (System Persona Prompt)</h2>
         </div>
-        <p class="modal-subtitle">選擇語音服務並設定聊天對象。GPT-Live 會在點擊麥克風時開始計費會話。</p>
+        <p class="modal-subtitle">使用您自己的 API Key，模型用量由您的帳戶負擔。GPT-Live 會在點擊麥克風時開始計費會話。</p>
       </div>
 
       <!-- Preset Quick Selection Cards -->
@@ -155,6 +155,14 @@
         </select>
       </div>
 
+      <div class="custom-prompt-wrapper">
+        <label for="apiKeyInput">所選服務的 API Key</label>
+        <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" maxlength="512" placeholder="貼上您自己的 API Key" aria-describedby="apiKeyHelp">
+        <p id="apiKeyHelp" class="modal-subtitle">確認後將金鑰儲存於此瀏覽器，下次自動帶入。使用時經本站後端轉送至所選服務，伺服器不儲存金鑰。共用電腦使用完畢後請清除。每日最多 500 位瀏覽器訪客，台灣時間午夜換日。</p>
+        <button type="button" class="btn btn-secondary" id="btnClearApiKey">清除此服務已儲存的金鑰</button>
+        <p id="apiKeyStorageStatus" class="modal-subtitle" role="status" aria-live="polite"></p>
+      </div>
+
       <!-- Custom Prompt Textarea -->
       <div class="custom-prompt-wrapper">
         <label for="customPersonaInput"><i class="fa-solid fa-pen-to-square"></i> 自訂對話角色提示詞 (System Instruction):</label>
@@ -175,6 +183,8 @@
   </div>
 
   <!-- Application JS -->
+  <script src="api-key-storage.js"></script>
+  <script src="access.js"></script>
   <script src="openai-live.js"></script>
   <script src="app.js"></script>
 </body>

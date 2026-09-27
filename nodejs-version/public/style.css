@@ -572,6 +572,8 @@ body {
 }
 
 .modal-card {
+  max-height: 90dvh;
+  overflow-y: auto;
   width: 90%;
   max-width: 650px;
   background: var(--bg-dark);
@@ -671,7 +673,8 @@ body {
   font-weight: 500;
 }
 
-#customPersonaInput {
+#customPersonaInput,
+#apiKeyInput {
   background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 14px;
@@ -683,7 +686,8 @@ body {
   outline: none;
 }
 
-#customPersonaInput:focus {
+#customPersonaInput:focus,
+#apiKeyInput:focus {
   border-color: var(--accent-primary);
   box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
 }

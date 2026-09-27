@@ -7,6 +7,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnChangePersona = document.getElementById('btnChangePersona');
   const currentPersonaText = document.getElementById('currentPersonaText');
   const providerSelect = document.getElementById('providerSelect');
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const apiKeyStorageStatus = document.getElementById('apiKeyStorageStatus');
+  let currentApiKey = '';
+  apiKeyInput.value = window.apiKeyStorage.read(providerSelect.value);
+  providerSelect.addEventListener('change', () => {
+    apiKeyInput.value = window.apiKeyStorage.read(providerSelect.value);
+    apiKeyStorageStatus.textContent = '';
+  });
+  document.getElementById('btnClearApiKey').addEventListener('click', () => {
+    const cleared = window.apiKeyStorage.clear(providerSelect.value);
+    apiKeyInput.value = '';
+    if (providerSelect.value === currentProvider) {
+      currentApiKey = '';
+      ++connectionAttempt;
+      if (currentProvider === 'openai') openAiLive.stop();
+      else {
+        if (ws) { ws.close(); ws = null; }
+        stopMicRecording();
+        stopAudioPlayback();
+      }
+      updateStatus(false, '已清除金鑰，請重新輸入');
+    }
+    apiKeyStorageStatus.textContent = cleared ? '已清除此服務儲存的金鑰。' : '無法存取瀏覽器儲存空間，請從瀏覽器設定清除此網站資料。';
+  });
   const modelBadge = document.getElementById('modelBadge');
 
   const statusDot = document.getElementById('statusDot');
@@ -95,7 +119,15 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const enteredApiKey = apiKeyInput.value.trim();
+    if (!enteredApiKey) {
+      alert('請輸入所選服務的 API Key。');
+      return;
+    }
+    currentApiKey = enteredApiKey;
+    const keySaved = window.apiKeyStorage.save(providerSelect.value, currentApiKey);
     currentPersona = persona;
+    ++connectionAttempt;
     const previousProvider = currentProvider;
     currentProvider = providerSelect.value;
     if (previousProvider === 'openai') openAiLive.stop();
@@ -113,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Reset Chat Window
     chatWindow.innerHTML = '';
     appendSystemNotice(`已設定對話對象 Persona：「${persona}」`);
+    if (!keySaved) appendSystemNotice('瀏覽器不允許儲存金鑰，本次僅保留在記憶體；重新整理後需再輸入。');
 
     // Connect / Re-init WebSocket
     if (currentProvider === 'openai') {
@@ -180,29 +213,46 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // WebSocket Logic
-  function initWebSocket(personaPrompt) {
+  let connectionAttempt = 0;
+  async function initWebSocket(personaPrompt) {
+    const attempt = ++connectionAttempt;
     if (ws) {
       ws.close();
     }
+
+    try {
+      await window.ensureVisitorAccess();
+    } catch (error) {
+      if (attempt === connectionAttempt && currentProvider === 'gemini') {
+        updateStatus(false, '無法開始對話');
+        appendSystemNotice(error.message);
+      }
+      return;
+    }
+    if (attempt !== connectionAttempt || currentProvider !== 'gemini') return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     
     updateStatus(false, '連線中...');
-    ws = new WebSocket(wsUrl);
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
 
     ws.onopen = () => {
+      if (ws !== socket) return;
       updateStatus(true, 'Gemini 3.1 Flash Live Preview 連線成功');
       // Send Init Payload
       ws.send(JSON.stringify({
         type: 'init',
         systemInstruction: personaPrompt,
         voice: currentVoice,
+        apiKey: currentApiKey,
         model: 'gemini-3.1-flash-live-preview'
       }));
     };
 
     ws.onmessage = (event) => {
+      if (ws !== socket) return;
       try {
         const data = JSON.parse(event.data);
 
@@ -225,11 +275,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     ws.onerror = (err) => {
+      if (ws !== socket) return;
       console.error('WebSocket Error:', err);
       updateStatus(false, '連線發生錯誤');
     };
 
     ws.onclose = () => {
+      if (ws !== socket) return;
       updateStatus(false, '連線已中斷');
       stopMicRecording();
     };
@@ -245,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setOpenAiMicUi(false);
       } else {
         setOpenAiMicUi(true);
-        await openAiLive.start(currentPersona);
+        await openAiLive.start(currentPersona, currentApiKey);
       }
       return;
     }

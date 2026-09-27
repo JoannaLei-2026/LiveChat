@@ -10,28 +10,73 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ noServer: true, maxPayload: 1024 * 1024 });
+
+let visitorQuota = null;
+if (process.env.DAILY_VISITOR_LIMIT) {
+  const { Firestore } = require('@google-cloud/firestore');
+  const { createQuota, firestoreStore } = require('./visitor-quota');
+  visitorQuota = createQuota({
+    store: firestoreStore(new Firestore({ databaseId: process.env.FIRESTORE_DATABASE || '(default)' })),
+    secret: process.env.VISITOR_COOKIE_SECRET,
+    limit: Number(process.env.DAILY_VISITOR_LIMIT)
+  });
+} else if (process.env.K_SERVICE) {
+  throw new Error('Cloud Run requires DAILY_VISITOR_LIMIT and VISITOR_COOKIE_SECRET');
+}
+
+function sameOrigin(req) {
+  try { return new URL(req.headers.origin).host === req.headers.host; }
+  catch { return false; }
+}
+
+server.on('upgrade', (req, socket, head) => {
+  if (visitorQuota && (!sameOrigin(req) || !visitorQuota.permitted(req.headers.cookie))) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+});
 
 const PORT = process.env.NODE_PORT || process.env.PORT || 3000;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const validApiKey = key => typeof key === 'string' && /^[\x21-\x7e]{16,512}$/.test(key) && !key.startsWith('your_');
 
 // Serve static frontend files
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
+app.use((error, req, res, next) => {
+  if (!error) return next();
+  // Parsing failures can include body fragments; never echo or log those fragments.
+  return res.status(400).json({ error: '無效的請求內容。' });
+});
+
+app.post('/api/access', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!sameOrigin(req)) return res.status(403).json({ error: '來源不符。' });
+  if (!visitorQuota) return res.json({ allowed: true });
+  try {
+    const cookie = await visitorQuota.admit(req.headers.cookie);
+    if (!cookie) return res.status(429).json({ error: '今日訪客名額已滿，請於台灣時間午夜後再試。' });
+    res.set('Set-Cookie', cookie + (process.env.K_SERVICE ? '; Secure' : ''));
+    return res.json({ allowed: true });
+  } catch (error) {
+    console.error('[Visitor quota] Admission unavailable:', error.code || error.name);
+    return res.status(503).json({ error: '暫時無法確認今日名額，請稍後重試。' });
+  }
+});
 
 // API health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    hasApiKey: !!GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_api_key_here',
-    hasOpenAiApiKey: !!OPENAI_API_KEY && OPENAI_API_KEY !== 'your_api_key_here',
+    requiresUserApiKey: true,
     version: '1.0.0-node'
   });
 });
 
-// The browser sends its WebRTC offer here; the project key never reaches the browser.
+// The user's key is used only for this request and is never stored or returned.
 app.post('/api/openai/live-session', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const origin = req.get('origin');
   if (!origin) return res.status(403).json({ error: '來源不符。' });
   try {
@@ -42,18 +87,22 @@ app.post('/api/openai/live-session', async (req, res) => {
     return res.status(403).json({ error: '來源不符。' });
   }
   const { sdp, instructions } = req.body || {};
+  if (visitorQuota && !visitorQuota.permitted(req.headers.cookie)) {
+    return res.status(403).json({ error: '請重新開始對話，以確認今日訪客名額。' });
+  }
   if (typeof sdp !== 'string' || !sdp.trim() || sdp.length > 65536 ||
       typeof instructions !== 'string' || !instructions.trim() || instructions.length > 4000) {
     return res.status(400).json({ error: '無效的 SDP 或角色設定。' });
   }
-  if (!OPENAI_API_KEY || OPENAI_API_KEY === 'your_api_key_here') {
-    return res.status(503).json({ error: '請在 .env 設定 OPENAI_API_KEY。' });
+  const apiKey = req.get('x-api-key');
+  if (!validApiKey(apiKey)) {
+    return res.status(400).json({ error: '請輸入您自己的 OpenAI API Key。' });
   }
   try {
     const upstream = await fetch('https://api.openai.com/v1/live/sessions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -74,7 +123,7 @@ app.post('/api/openai/live-session', async (req, res) => {
     }
     return res.status(201).json(await upstream.json());
   } catch (error) {
-    console.error('[OpenAI Live] Session creation error:', error);
+    console.error('[OpenAI Live] Session creation request failed');
     return res.status(502).json({ error: '無法連線至 OpenAI Live API。' });
   }
 });
@@ -90,18 +139,19 @@ wss.on('connection', (ws) => {
   };
 
   let geminiWs = null;
+  let apiKey = null;
 
   // Initialize Gemini WebSocket Connection
   function connectToGeminiLive() {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
+    if (!validApiKey(apiKey)) {
       ws.send(JSON.stringify({
         type: 'error',
-        message: '未設定有效的 GEMINI_API_KEY。請在 .env 檔案中填入您的 Gemini API Key。'
+        message: '請輸入您自己的 Gemini API Key。'
       }));
       return;
     }
 
-    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+    const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(apiKey)}`;
 
     try {
       geminiWs = new WebSocket(geminiUrl);
@@ -171,7 +221,7 @@ wss.on('connection', (ws) => {
       });
 
       geminiWs.on('error', (err) => {
-        console.warn('[Live Chat] WebSocket error, falling back to HTTP stream:', err.message);
+        console.warn('[Live Chat] WebSocket connection failed');
         ws.send(JSON.stringify({ type: 'status', connected: true, mode: 'REST Stream (Fallback)' }));
       });
 
@@ -180,7 +230,7 @@ wss.on('connection', (ws) => {
       });
 
     } catch (e) {
-      console.warn('[Live Chat] Exception initiating WebSocket:', e.message);
+      console.warn('[Live Chat] Could not initiate WebSocket');
     }
   }
 
@@ -190,14 +240,17 @@ wss.on('connection', (ws) => {
       const data = JSON.parse(message.toString());
 
       if (data.type === 'init') {
+        if (!validApiKey(data.apiKey)) {
+          ws.send(JSON.stringify({ type: 'error', message: '請輸入您自己的 Gemini API Key。' }));
+          return;
+        }
+        apiKey = data.apiKey;
         sessionConfig.systemInstruction = data.systemInstruction || sessionConfig.systemInstruction;
         sessionConfig.voiceName = data.voice || sessionConfig.voiceName || "Puck";
         sessionConfig.model = data.model || "gemini-3.1-flash-live-preview";
         sessionConfig.history = [];
-        console.log('[Init Persona & Voice]', sessionConfig.systemInstruction, sessionConfig.voiceName);
-
-        if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
-          geminiWs.close();
+        if (geminiWs) {
+          geminiWs.terminate();
         }
         connectToGeminiLive();
         ws.send(JSON.stringify({ type: 'init_success', systemInstruction: sessionConfig.systemInstruction }));
@@ -233,28 +286,27 @@ wss.on('connection', (ws) => {
           geminiWs.send(JSON.stringify(clientMsg));
         } else {
           // Stream via Gemini HTTP SSE API as robust fallback
-          await streamViaRestApi(userText, ws, sessionConfig);
+          await streamViaRestApi(userText, ws, sessionConfig, apiKey);
         }
       }
     } catch (err) {
-      console.error('[Client Message Error]', err);
-      ws.send(JSON.stringify({ type: 'error', message: '處理訊息時發生錯誤：' + err.message }));
+      console.error('[Client Message Error] Invalid message');
+      ws.send(JSON.stringify({ type: 'error', message: '處理訊息時發生錯誤。' }));
     }
   });
 
   ws.on('close', () => {
-    if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
-      geminiWs.close();
-    }
+    apiKey = null;
+    if (geminiWs) geminiWs.terminate();
   });
 });
 
 // REST Fallback streaming helper using native fetch
-async function streamViaRestApi(userText, ws, sessionConfig) {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
+async function streamViaRestApi(userText, ws, sessionConfig, apiKey) {
+  if (!validApiKey(apiKey)) {
     ws.send(JSON.stringify({
       type: 'error',
-      message: '未設定有效的 GEMINI_API_KEY。請在 .env 檔案中填入您的 Gemini API Key。'
+      message: '請輸入您自己的 Gemini API Key。'
     }));
     return;
   }
@@ -276,7 +328,7 @@ async function streamViaRestApi(userText, ws, sessionConfig) {
 
   try {
     for (const m of candidateModels) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -339,8 +391,8 @@ async function streamViaRestApi(userText, ws, sessionConfig) {
     ws.send(JSON.stringify({ type: 'end' }));
 
   } catch (err) {
-    console.error('[REST Fallback Stream Error]', err);
-    ws.send(JSON.stringify({ type: 'error', message: err.message }));
+    console.error('[REST Fallback Stream Error] Request failed');
+    ws.send(JSON.stringify({ type: 'error', message: '連線至模型服務失敗，請稍後重試。' }));
   }
 }
 

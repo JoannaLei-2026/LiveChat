@@ -14,13 +14,15 @@ window.OpenAILiveConnection = class OpenAILiveConnection {
     this.generation = 0;
   }
 
-  async start(instructions) {
+  async start(instructions, apiKey) {
     if (this.closing) await this.closed;
     if (this.ready || this.starting) return;
     const generation = ++this.generation;
     this.starting = true;
     this.onStatus(false, 'GPT-Live 連線中...');
     try {
+      await window.ensureVisitorAccess();
+      if (generation !== this.generation) return;
       const peer = new RTCPeerConnection();
       this.peer = peer;
       peer.addEventListener('track', ({ track }) => {
@@ -89,7 +91,7 @@ window.OpenAILiveConnection = class OpenAILiveConnection {
       this.abortController = new AbortController();
       const response = await fetch('/api/openai/live-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify({ sdp: peer.localDescription.sdp, instructions }),
         signal: this.abortController.signal
       });
